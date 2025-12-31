@@ -85,4 +85,66 @@ if st.button('🚀 リスト作成開始 (5社推奨)'):
                 
                 for label, days in target_days.items():
                     target_date = last_date + timedelta(days=days)
-                    closest =
+                    
+                    # --- 【修正箇所】長い行を分割してエラー回避 ---
+                    # 日付の差分を計算
+                    time_diff = (forecast['ds'] - target_date).abs()
+                    # 一番近い日のインデックスを取得
+                    closest_idx = time_diff.argsort()[:1]
+                    # その行のデータを取得
+                    closest = forecast.iloc[closest_idx].iloc[0]
+                    # ----------------------------------------
+                    
+                    p_val = calculate_probability(
+                        current_price, 
+                        to_float(closest['yhat']), 
+                        to_float(closest['yhat_lower']), 
+                        to_float(closest['yhat_upper'])
+                    )
+                    probs[label] = p_val
+                    
+                    if p_val >= 85.0:
+                        is_promising = True
+                
+                # 銘柄名取得 (簡易)
+                try:
+                    ticker_info = yf.Ticker(t_symbol)
+                    comp_name = ticker_info.info.get('longName', code)
+                except:
+                    comp_name = code
+
+                results.append({
+                    "コード": code,
+                    "銘柄名": comp_name,
+                    "現在値": f"{current_price:,.0f}",
+                    "3ヶ月確率": probs["3ヶ月"],
+                    "6ヶ月確率": probs["6ヶ月"],
+                    "12ヶ月確率": probs["12ヶ月"],
+                    "判定": "🔥 激熱" if is_promising else "-"
+                })
+
+        except Exception:
+            continue
+
+    my_bar.empty()
+
+    if results:
+        res_df = pd.DataFrame(results)
+        
+        # 85%以上を赤く塗るデザイン設定
+        def highlight_high_prob(val):
+            color = '#ffcccc' if isinstance(val, float) and val >= 85.0 else ''
+            return f'background-color: {color}; color: black'
+
+        st.subheader("📋 分析結果リスト")
+        st.dataframe(
+            res_df.style.applymap(highlight_high_prob, subset=["3ヶ月確率", "6ヶ月確率", "12ヶ月確率"])
+                  .format({"3ヶ月確率": "{:.1f}%", "6ヶ月確率": "{:.1f}%", "12ヶ月確率": "{:.1f}%"}),
+            use_container_width=True,
+            height=500
+        )
+    else:
+        st.warning("データが取得できませんでした。")
+
+st.markdown("---")
+st.caption("※ チャート表示機能を削除し、リスト表示に特化した軽量版です。")
