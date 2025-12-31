@@ -20,7 +20,7 @@ def to_float(x):
 
 # --- ページ設定 ---
 st.set_page_config(page_title="日本株AI統合分析ツール", layout="wide")
-st.title('🇯🇵 日本株AI統合分析ツール (エラー防止版)')
+st.title('🇯🇵 日本株AI統合分析ツール (企業名表示版)')
 
 # --- サイドバー設定 (期間選択) ---
 st.sidebar.header("⚙️ 分析設定")
@@ -71,7 +71,7 @@ def get_ai_reasons(forecast, current_date, target_date, current_price, predicted
 #  PART 1: 有望株スクリーニング
 # ==========================================
 st.header(f"1️⃣ 有望株AIスクリーニング ({period_select}年データ)")
-st.markdown(f"複数の銘柄を一括チェックします。**過去{period_select}年分**のデータに基づき判定します。")
+st.markdown(f"複数の銘柄を一括チェックします。")
 
 default_tickers = "7203, 9984, 8306, 7974, 6920"
 user_tickers = st.text_area("銘柄コードリスト (カンマ区切り)", default_tickers, height=70)
@@ -85,6 +85,17 @@ if st.button('🚀 リスト作成開始 (5社推奨)'):
         my_bar.progress((i + 1) / len(ticker_list), text=f"計算中: {code}")
         try:
             t_symbol = f"{code}.T"
+            
+            # --- ★企業名を取得する処理を追加 ---
+            try:
+                ticker_info = yf.Ticker(t_symbol)
+                # longName(正式名称)が取れなければコードを入れる
+                company_name = ticker_info.info.get('longName', code)
+            except:
+                company_name = code
+            # -------------------------------
+
+            # 株価データの取得
             df_hist = yf.download(t_symbol, period=period_str, interval="1d", progress=False)
             
             if len(df_hist) > 100:
@@ -123,6 +134,7 @@ if st.button('🚀 リスト作成開始 (5社推奨)'):
                 
                 results.append({
                     "コード": code,
+                    "企業名": company_name, # ★ここに追加
                     "現在値": f"{curr:,.0f}",
                     "3ヶ月確率": probs["3ヶ月"],
                     "6ヶ月確率": probs["6ヶ月"],
@@ -163,7 +175,7 @@ if st.button('🚀 リスト作成開始 (5社推奨)'):
 st.markdown("---")
 
 # ==========================================
-#  PART 2: 個別詳細分析 (構造簡素化)
+#  PART 2: 個別詳細分析
 # ==========================================
 st.header("2️⃣ 個別銘柄 詳細分析 & AI根拠")
 st.markdown(f"AIがなぜその予測を出したのか、根拠も表示します。(データ: 過去{period_select}年)")
@@ -179,7 +191,6 @@ with col_btn:
 if start_detail:
     ticker = f"{detail_code}.T"
     
-    # ★以前の大きな try-except ブロックを削除し、データ取得部分のみ保護
     with st.spinner(f'{detail_code} を詳細分析中...'):
         try:
             stk_data = yf.download(ticker, period=period_str, interval="1d", progress=False)
@@ -192,7 +203,6 @@ if start_detail:
         st.error("データが見つかりません。")
         st.stop()
 
-    # 以下、データ処理（tryブロックの外に出して安全性を確保）
     def clean_df(raw_df):
         df = raw_df.reset_index()
         if isinstance(df.columns, pd.MultiIndex):
