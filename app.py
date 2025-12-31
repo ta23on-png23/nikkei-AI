@@ -20,14 +20,14 @@ def to_float(x):
 
 # --- ページ設定 ---
 st.set_page_config(page_title="日本株AI統合分析ツール", layout="wide")
-st.title('🇯🇵 日本株AI統合分析ツール (期間切替版)')
+st.title('🇯🇵 日本株AI統合分析ツール (エラー防止版)')
 
 # --- サイドバー設定 (期間選択) ---
 st.sidebar.header("⚙️ 分析設定")
 period_select = st.sidebar.radio(
     "学習データの期間を選択:",
     (3, 5),
-    index=0, # デフォルトは3年
+    index=0, 
     help="【3年】直近のトレンド(勢い)を重視します。\n【5年】長期的な実力や季節性を重視します。"
 )
 period_str = f"{period_select}y"
@@ -85,7 +85,6 @@ if st.button('🚀 リスト作成開始 (5社推奨)'):
         my_bar.progress((i + 1) / len(ticker_list), text=f"計算中: {code}")
         try:
             t_symbol = f"{code}.T"
-            # ★選択された期間(period_str)を使用
             df_hist = yf.download(t_symbol, period=period_str, interval="1d", progress=False)
             
             if len(df_hist) > 100:
@@ -136,8 +135,6 @@ if st.button('🚀 リスト作成開始 (5社推奨)'):
     
     if results:
         res_df = pd.DataFrame(results)
-        
-        # 安全な表示ロジック
         try:
             def highlight(val):
                 if isinstance(val, (int, float)) and val >= 85.0:
@@ -146,11 +143,8 @@ if st.button('🚀 リスト作成開始 (5社推奨)'):
 
             styler = res_df.style
             target_cols = ["3ヶ月確率", "6ヶ月確率", "12ヶ月確率"]
-            
-            if hasattr(styler, "map"): 
-                styler = styler.map(highlight, subset=target_cols)
-            else: 
-                styler = styler.applymap(highlight, subset=target_cols)
+            if hasattr(styler, "map"): styler = styler.map(highlight, subset=target_cols)
+            else: styler = styler.applymap(highlight, subset=target_cols)
             
             st.dataframe(
                 styler,
@@ -162,7 +156,6 @@ if st.button('🚀 リスト作成開始 (5社推奨)'):
                 use_container_width=True
             )
         except Exception as e:
-            st.warning(f"データ表示エラー: {e}")
             st.dataframe(res_df, use_container_width=True)
     else:
         st.warning("データが取得できませんでした。")
@@ -170,7 +163,7 @@ if st.button('🚀 リスト作成開始 (5社推奨)'):
 st.markdown("---")
 
 # ==========================================
-#  PART 2: 個別詳細分析
+#  PART 2: 個別詳細分析 (構造簡素化)
 # ==========================================
 st.header("2️⃣ 個別銘柄 詳細分析 & AI根拠")
 st.markdown(f"AIがなぜその予測を出したのか、根拠も表示します。(データ: 過去{period_select}年)")
@@ -185,56 +178,117 @@ with col_btn:
 
 if start_detail:
     ticker = f"{detail_code}.T"
-    try:
-        with st.spinner(f'{detail_code} を詳細分析中...'):
-            # ★選択された期間(period_str)を使用
+    
+    # ★以前の大きな try-except ブロックを削除し、データ取得部分のみ保護
+    with st.spinner(f'{detail_code} を詳細分析中...'):
+        try:
             stk_data = yf.download(ticker, period=period_str, interval="1d", progress=False)
             usd_data = yf.download("USDJPY=X", period=period_str, interval="1d", progress=False)
-
-        if stk_data.empty:
-            st.error("データが見つかりません。")
+        except Exception as e:
+            st.error(f"データ取得中にエラーが発生しました: {e}")
             st.stop()
 
-        def clean_df(raw_df):
-            df = raw_df.reset_index()
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            cols = {c.lower(): c for c in df.columns}
-            d_c = next((c for k, c in cols.items() if 'date' in k), df.columns[0])
-            c_c = next((c for k, c in cols.items() if 'close' in k), df.columns[1])
-            o_c = next((c for k, c in cols.items() if 'open' in k), c_c)
-            h_c = next((c for k, c in cols.items() if 'high' in k), c_c)
-            l_c = next((c for k, c in cols.items() if 'low' in k), c_c)
-            out = pd.DataFrame()
-            out['ds'] = pd.to_datetime(df[d_c]).dt.tz_localize(None)
-            out['Open'] = df[o_c]
-            out['High'] = df[h_c]
-            out['Low'] = df[l_c]
-            out['Close'] = df[c_c]
-            return out
+    if stk_data.empty:
+        st.error("データが見つかりません。")
+        st.stop()
 
-        df_s = clean_df(stk_data)
-        df_u = clean_df(usd_data)
+    # 以下、データ処理（tryブロックの外に出して安全性を確保）
+    def clean_df(raw_df):
+        df = raw_df.reset_index()
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        cols = {c.lower(): c for c in df.columns}
+        d_c = next((c for k, c in cols.items() if 'date' in k), df.columns[0])
+        c_c = next((c for k, c in cols.items() if 'close' in k), df.columns[1])
+        o_c = next((c for k, c in cols.items() if 'open' in k), c_c)
+        h_c = next((c for k, c in cols.items() if 'high' in k), c_c)
+        l_c = next((c for k, c in cols.items() if 'low' in k), c_c)
+        out = pd.DataFrame()
+        out['ds'] = pd.to_datetime(df[d_c]).dt.tz_localize(None)
+        out['Open'] = df[o_c]
+        out['High'] = df[h_c]
+        out['Low'] = df[l_c]
+        out['Close'] = df[c_c]
+        return out
 
-        try:
-            info = yf.Ticker(ticker)
-            name = info.info.get('longName', f"コード: {detail_code}")
-        except: name = f"コード: {detail_code}"
+    df_s = clean_df(stk_data)
+    df_u = clean_df(usd_data)
 
-        curr_price = to_float(df_s['Close'].iloc[-1])
-        last_dt = df_s['ds'].iloc[-1]
+    try:
+        info = yf.Ticker(ticker)
+        name = info.info.get('longName', f"コード: {detail_code}")
+    except: name = f"コード: {detail_code}"
 
-        st.subheader(f"🏢 {name}")
-        st.metric("現在終値", f"{curr_price:,.0f} 円", f"基準日: {last_dt.strftime('%Y/%m/%d')}")
+    curr_price = to_float(df_s['Close'].iloc[-1])
+    last_dt = df_s['ds'].iloc[-1]
 
-        st.subheader(f"⚡ 過去の急変動 (5%以上) と要因")
-        df_s['Change'] = df_s['Close'].pct_change() * 100
-        df_u['Change'] = df_u['Close'].pct_change() * 100
-        df_m = pd.merge(df_s, df_u[['ds', 'Change']], on='ds', how='inner', suffixes=('', '_USD'))
-        big_moves = df_m[df_m['Change'].abs() >= 5.0].copy().sort_values('ds', ascending=False)
+    st.subheader(f"🏢 {name}")
+    st.metric("現在終値", f"{curr_price:,.0f} 円", f"基準日: {last_dt.strftime('%Y/%m/%d')}")
 
-        if not big_moves.empty:
-            m_res = []
-            for idx, row in big_moves.iterrows():
-                d_str = row['ds'].strftime('%Y-%m-%d')
-                move
+    # A. 急変動チェック
+    st.subheader(f"⚡ 過去の急変動 (5%以上) と要因")
+    df_s['Change'] = df_s['Close'].pct_change() * 100
+    df_u['Change'] = df_u['Close'].pct_change() * 100
+    df_m = pd.merge(df_s, df_u[['ds', 'Change']], on='ds', how='inner', suffixes=('', '_USD'))
+    big_moves = df_m[df_m['Change'].abs() >= 5.0].copy().sort_values('ds', ascending=False)
+
+    if not big_moves.empty:
+        m_res = []
+        for idx, row in big_moves.iterrows():
+            d_str = row['ds'].strftime('%Y-%m-%d')
+            move = "急騰" if row['Change'] > 0 else "急落"
+            url = f"https://www.google.com/search?q={name} {d_str} 株価 {move} 理由"
+            u_chg = row['Change_USD']
+            corr = "🔄 連動?" if (row['Change']*u_chg > 0 and abs(u_chg)>0.5) else "⚡ 独自"
+            m_res.append({"日時": d_str, "変動率": f"{row['Change']:+.2f}%", "ドル円": f"{u_chg:+.2f}%", "タイプ": corr, "詳細": url})
+        st.dataframe(pd.DataFrame(m_res), column_config={"詳細": st.column_config.LinkColumn("ニュース検索", display_text="🔍 理由")}, hide_index=True)
+    else:
+        st.info(f"※ 直近{period_select}年間で、日足5%以上の急変動はありませんでした。")
+
+    # B. AI予測
+    with st.spinner('AIが未来を予測中...'):
+        df_prophet = pd.DataFrame({'ds': df_s['ds'], 'y': df_s['Close']})
+        m = Prophet(changepoint_prior_scale=0.05, daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
+        m.fit(df_prophet)
+        future = m.make_future_dataframe(periods=366, freq='D')
+        forecast = m.predict(future)
+
+    st.subheader('🎯 未来の上昇・下落確率とAIの根拠')
+    fut_fcst = forecast[forecast['ds'] > last_dt].copy()
+    targets = {"1ヶ月後": 30, "3ヶ月後": 90, "6ヶ月後": 180, "12ヶ月後": 365}
+    
+    for lbl, days in targets.items():
+        tgt_d = last_dt + timedelta(days=days)
+        diff = (fut_fcst['ds'] - tgt_d).abs()
+        c_idx = diff.argsort()[:1]
+        if len(c_idx) > 0:
+            row = fut_fcst.iloc[c_idx].iloc[0]
+            pred = to_float(row['yhat'])
+            pup = calculate_probability(curr_price, pred, to_float(row['yhat_lower']), to_float(row['yhat_upper']))
+            reasons = get_ai_reasons(forecast, last_dt, tgt_d, curr_price, pred)
+            
+            trend = "➡️ レンジ"
+            if pup >= 60: trend = "↗️ 上昇優勢"
+            elif 100-pup >= 60: trend = "↘️ 下落優勢"
+
+            with st.container():
+                st.markdown(f"### 🕒 **{lbl}** の予測 ({row['ds'].strftime('%Y/%m/%d')})")
+                c1, c2, c3 = st.columns([1, 1, 2])
+                c1.metric("予測株価", f"{pred:,.0f} 円")
+                c2.metric("上昇確率", f"{pup:.1f} %", trend)
+                with c3:
+                    st.markdown("**AIの判断根拠:**")
+                    for r in reasons:
+                        st.markdown(f"- {r}")
+                st.divider()
+
+    # C. チャート
+    st.subheader('📊 長期予測チャート')
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(x=df_s['ds'], open=df_s['Open'], high=df_s['High'], low=df_s['Low'], close=df_s['Close'], name='実測値'))
+    fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='AI予測', line=dict(color='yellow', width=2)))
+    fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_upper'], mode='lines', line=dict(width=0), hoverinfo='skip', showlegend=False))
+    fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(255, 255, 0, 0.2)', hoverinfo='skip', showlegend=False, name='予測範囲'))
+    fig.update_layout(title=f"{name} 日足チャート & AI予測", template="plotly_dark", height=600, xaxis_rangeslider_visible=True)
+    fig.update_xaxes(range=[last_dt - timedelta(days=365*period_select/2), last_dt + timedelta(days=365)])
+    st.plotly_chart(fig, use_container_width=True)
