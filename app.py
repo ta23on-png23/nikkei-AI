@@ -104,7 +104,11 @@ try:
     # --- 3. 急変動チェック (日足で5%以上) ---
     st.subheader("⚡ 過去の急変動 (5%以上) と要因")
     
+    # 変動率計算（★ここを修正しました★）
     df_stock['Change'] = df_stock['Close'].pct_change() * 100
+    df_usdjpy['Change'] = df_usdjpy['Close'].pct_change() * 100 # ←この行が抜けていました！
+
+    # データ結合
     df_merged = pd.merge(df_stock, df_usdjpy[['ds', 'Change']], on='ds', how='inner', suffixes=('', '_USD'))
     
     threshold = 5.0 # 5%以上の変動を検知
@@ -164,7 +168,7 @@ try:
     
     # ターゲット日数設定
     target_days = {
-        "3日後": 3,      # ここを1→3に変更しました
+        "3日後": 3,
         "1週間後": 7,
         "1か月後": 30,
         "1年後": 365
