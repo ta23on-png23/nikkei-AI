@@ -20,7 +20,7 @@ def to_float(x):
 
 # --- ページ設定 ---
 st.set_page_config(page_title="日本株AI統合分析ツール", layout="wide")
-st.title('🇯🇵 日本株AI統合分析ツール (根拠コメント付き)')
+st.title('🇯🇵 日本株AI統合分析ツール (安全版)')
 
 # --- 確率計算関数 ---
 def calculate_probability(current_price, predicted_price, lower_bound, upper_bound):
@@ -30,44 +30,29 @@ def calculate_probability(current_price, predicted_price, lower_bound, upper_bou
     z_score = (p - c) / sigma
     return norm.cdf(z_score) * 100
 
-# --- ★新機能：AIの根拠生成関数 ---
+# --- AI根拠生成関数 ---
 def get_ai_reasons(forecast, current_date, target_date, current_price, predicted_price):
     reasons = []
-    
-    # データを取得
-    # current_row = forecast.loc[forecast['ds'] == pd.to_datetime(current_date)].iloc[0] # 直近は予測データに含まれないことがあるため省略
     target_row = forecast.iloc[(forecast['ds'] - target_date).abs().argsort()[:1]].iloc[0]
     
-    # 1. トレンド分析 (trend成分)
-    # 予測価格と現在価格の差を見るのが一番確実
+    # 1. トレンド分析
     price_diff_pct = ((predicted_price - current_price) / current_price) * 100
-    
     if price_diff_pct > 5.0:
-        reasons.append("📈 **強い上昇トレンド**: 長期的な成長軌道に乗っており、AIは力強い上昇を予測しています。")
+        reasons.append("📈 **強い上昇トレンド**: 長期的な成長軌道に乗っています。")
     elif price_diff_pct > 0:
-        reasons.append("↗️ **緩やかな上昇**: 急騰ではありませんが、底堅い上昇トレンドが継続すると判断しました。")
+        reasons.append("↗️ **緩やかな上昇**: 底堅いトレンドが継続すると判断しました。")
     elif price_diff_pct < -5.0:
-        reasons.append("📉 **下落警戒**: 長期トレンドが下向きであり、AIは慎重な見方をしています。")
+        reasons.append("📉 **下落警戒**: トレンドが下向きです。")
     else:
-        reasons.append("➡️ **横ばい**: 明確なトレンドが出ておらず、現在の価格帯での推移を予測しています。")
+        reasons.append("➡️ **横ばい**: 明確なトレンドが出ていません。")
 
-    # 2. 季節性分析 (yearly成分)
-    # その時期が、年間を通して「高い時期」か「低い時期」か
+    # 2. 季節性分析
     if 'yearly' in target_row:
         yearly_effect = target_row['yearly']
         if yearly_effect > 0:
-            reasons.append("🌸 **季節性の追い風**: 例年、この時期は株価が上がりやすい傾向（アノマリー）があります。")
+            reasons.append("🌸 **季節性の追い風**: 例年、この時期は上がりやすい傾向があります。")
         elif yearly_effect < 0:
-            reasons.append("🍂 **季節性の向かい風**: 例年、この時期は調整局面に入りやすい傾向があります。")
-
-    # 3. 曜日要因 (weekly成分)
-    # 短期（1ヶ月以内）の場合のみ表示
-    days_diff = (target_date - current_date).days
-    if days_diff <= 30 and 'weekly' in target_row:
-        weekly_effect = target_row['weekly']
-        week_day_name = target_date.strftime('%A') # 曜日名
-        if weekly_effect > 0:
-            reasons.append(f"📅 **曜日要因**: この銘柄は統計的に「{week_day_name}」に強い傾向があります。")
+            reasons.append("🍂 **季節性の向かい風**: 例年、この時期は調整しやすい傾向があります。")
             
     return reasons
 
@@ -135,11 +120,44 @@ if st.button('🚀 リスト作成開始 (5社推奨)'):
         except: continue
     
     my_bar.empty()
+    
     if results:
         res_df = pd.DataFrame(results)
-        def highlight(val):
-            return f'background-color: #ffcccc; color: black' if isinstance(val, float) and val >= 85.0 else ''
-        st.dataframe(res_df.style.applymap(highlight, subset=["3ヶ月確率", "6ヶ月確率", "12ヶ月確率"]).format("{:.1f}%"), use_container_width=True)
+        
+        # --- 安全な表示ロジック ---
+        try:
+            # ハイライト関数
+            def highlight(val):
+                if isinstance(val, (int, float)) and val >= 85.0:
+                    return 'background-color: #ffcccc; color: black'
+                return ''
+
+            # Pandasのバージョン互換性を考慮したスタイル適用
+            styler = res_df.style
+            target_cols = ["3ヶ月確率", "6ヶ月確率", "12ヶ月確率"]
+            
+            if hasattr(styler, "map"): # 新しいPandas用
+                styler = styler.map(highlight, subset=target_cols)
+            else: # 古いPandas用
+                styler = styler.applymap(highlight, subset=target_cols)
+            
+            # フォーマットはStreamlitの機能で行う（これが一番安全）
+            st.dataframe(
+                styler,
+                column_config={
+                    "3ヶ月確率": st.column_config.NumberColumn(format="%.1f%%"),
+                    "6ヶ月確率": st.column_config.NumberColumn(format="%.1f%%"),
+                    "12ヶ月確率": st.column_config.NumberColumn(format="%.1f%%"),
+                },
+                use_container_width=True
+            )
+        except Exception as e:
+            # 万が一スタイルでコケてもデータは出す
+            st.warning(f"スタイルの適用に失敗しましたがデータを表示します: {e}")
+            st.dataframe(res_df, use_container_width=True)
+            
+    else:
+        st.warning("データが取得できませんでした。")
 
 st.markdown("---")
 
@@ -147,7 +165,7 @@ st.markdown("---")
 #  PART 2: 個別詳細分析
 # ==========================================
 st.header("2️⃣ 個別銘柄 詳細分析 & AI根拠")
-st.markdown("AIがなぜその予測を出したのか、**根拠（トレンド・季節性）**も表示します。")
+st.markdown("AIがなぜその予測を出したのか、**根拠**も表示します。")
 
 col_input, col_btn = st.columns([3, 1])
 with col_input:
@@ -242,14 +260,12 @@ if start_detail:
                 pred = to_float(row['yhat'])
                 pup = calculate_probability(curr_price, pred, to_float(row['yhat_lower']), to_float(row['yhat_upper']))
                 
-                # AI根拠の取得
                 reasons = get_ai_reasons(forecast, last_dt, tgt_d, curr_price, pred)
                 
                 trend = "➡️ レンジ"
                 if pup >= 60: trend = "↗️ 上昇優勢"
                 elif 100-pup >= 60: trend = "↘️ 下落優勢"
 
-                # 表示用コンテナ
                 with st.container():
                     st.markdown(f"### 🕒 **{lbl}** の予測 ({row['ds'].strftime('%Y/%m/%d')})")
                     c1, c2, c3 = st.columns([1, 1, 2])
