@@ -6,6 +6,89 @@ from scipy.stats import norm
 import plotly.graph_objs as go
 from datetime import timedelta
 
+# ==========================================
+#  設定：パスワードとセキュリティ
+# ==========================================
+# ★ここに設定したいパスワードを入れてください
+DEMO_PASSWORD = "demo" 
+
+# --- ページ設定 (必ず一番最初に書く) ---
+st.set_page_config(page_title="東P株AIツール", layout="wide")
+
+# --- UI非表示設定 (CSS) ---
+# これで設定メニューや下の管理バーを隠します
+hide_streamlit_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            div[data-testid="stToolbar"] {visibility: hidden;}
+            .stDeployButton {display:none;}
+            
+            /* アプリ全体の背景黒・文字白 */
+            .stApp {
+                background-color: #000000;
+                color: #ffffff;
+            }
+            /* 全てのテキストを白く・太く */
+            h1, h2, h3, h4, h5, h6, p, div, span, label, li {
+                color: #ffffff !important;
+                font-family: sans-serif;
+            }
+            /* ラジオボタン */
+            div[data-testid="stRadio"] label p {
+                font-weight: bold !important;
+                font-size: 1.1rem !important;
+                color: #ffffff !important;
+            }
+            /* 入力ボックス */
+            .stTextInput > div > div > input {
+                color: #ffffff !important;
+                background-color: #333333;
+                font-weight: bold;
+            }
+            /* 余白調整 */
+            .block-container {
+                padding-top: 2rem;
+                padding-bottom: 5rem;
+                padding-left: 0.5rem;
+                padding-right: 0.5rem;
+            }
+            /* テーブルヘッダー非表示 */
+            thead tr th:first-child {display:none}
+            tbody th {display:none}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+# --- パスワード認証機能 ---
+def check_password():
+    """パスワードが正しいかチェックする関数"""
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+
+    if st.session_state.password_correct:
+        return True
+
+    st.markdown("### 🔒 デモ版アクセス制限")
+    password = st.text_input("パスワードを入力してください", type="password")
+    
+    if password:
+        if password == DEMO_PASSWORD:
+            st.session_state.password_correct = True
+            st.rerun() # 再読み込みしてアプリを表示
+        else:
+            st.error("パスワードが違います")
+    return False
+
+# パスワードが通っていない場合はここで処理を止める（アプリの中身を見せない）
+if not check_password():
+    st.stop()
+
+# ==========================================
+#  以下、メインアプリの処理 (認証成功後に実行)
+# ==========================================
+
 # --- 安全な数値変換関数 ---
 def to_float(x):
     try:
@@ -17,51 +100,6 @@ def to_float(x):
         if isinstance(x, list): return float(x[0])
         return float(x)
     except: return 0.0
-
-# --- ページ設定 & デザイン調整 (CSS) ---
-st.set_page_config(page_title="東P株AIツール", layout="wide")
-
-st.markdown("""
-    <style>
-    /* 1. アプリ全体の背景黒・文字白 */
-    .stApp {
-        background-color: #000000;
-        color: #ffffff;
-    }
-    
-    /* 2. 全てのテキストを白く・太く */
-    h1, h2, h3, h4, h5, h6, p, div, span, label, li {
-        color: #ffffff !important;
-        font-family: sans-serif;
-    }
-    
-    /* 3. ラジオボタン */
-    div[data-testid="stRadio"] label p {
-        font-weight: bold !important;
-        font-size: 1.1rem !important;
-        color: #ffffff !important;
-    }
-
-    /* 4. 入力ボックス */
-    .stTextInput > div > div > input {
-        color: #ffffff !important;
-        background-color: #333333;
-        font-weight: bold;
-    }
-    
-    /* 5. 余白調整 */
-    .block-container {
-        padding-top: 4rem;
-        padding-bottom: 5rem;
-        padding-left: 0.5rem;
-        padding-right: 0.5rem;
-    }
-    
-    /* テーブルヘッダー非表示 */
-    thead tr th:first-child {display:none}
-    tbody th {display:none}
-    </style>
-    """, unsafe_allow_html=True)
 
 # --- タイトル & デモ版表記 ---
 st.markdown("### **東P株AIツール**")
