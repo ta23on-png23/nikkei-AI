@@ -21,27 +21,22 @@ def to_float(x):
 # --- ページ設定 & 黒背景CSS適用 ---
 st.set_page_config(page_title="東P株AIツール", layout="wide")
 
-# CSSで黒背景、余白削除、文字サイズ調整
 st.markdown("""
     <style>
-    /* 全体の背景を黒に */
     .stApp {
         background-color: #000000;
         color: #ffffff;
     }
-    /* タイトル周りの余白を詰める */
     .block-container {
         padding-top: 2rem;
-        padding-bottom: 2rem;
+        padding-bottom: 5rem; /* 下部に少し余裕を持たせる */
         padding-left: 1rem;
         padding-right: 1rem;
     }
-    /* 入力フォームの背景調整 */
     .stTextInput > div > div > input {
         color: white;
         background-color: #333333;
     }
-    /* テーブルのヘッダー調整 */
     thead tr th:first-child {display:none}
     tbody th {display:none}
     </style>
@@ -50,14 +45,16 @@ st.markdown("""
 # --- タイトル ---
 st.markdown("**東P株AIツール**")
 
-# --- 期間選択（メイン画面配置） ---
-period_select = st.radio(
+# --- 期間選択（3年、5年ボタン） ---
+period_label = st.radio(
     "期間選択",
-    (3, 5),
+    ("3年", "5年"),
     index=0,
     horizontal=True,
-    label_visibility="collapsed" # ラベルを隠してシンプルに
+    label_visibility="collapsed"
 )
+# "3年" -> 3 に変換
+period_select = int(period_label.replace("年", ""))
 period_str = f"{period_select}y"
 st.write(f"※ 過去{period_select}年データで分析")
 
@@ -76,7 +73,6 @@ def calculate_probability(current_price, predicted_price, lower_bound, upper_bou
 if target_code:
     ticker = f"{target_code}.T"
     
-    # データ取得
     try:
         with st.spinner('Loading...'):
             df_hist = yf.download(ticker, period=period_str, interval="1d", progress=False)
@@ -108,17 +104,15 @@ if target_code:
             try:
                 info = yf.Ticker(ticker)
                 full_name = info.info.get('longName', target_code)
-                # 4文字程度に短縮
                 short_name = full_name[:4] + "..." if len(full_name) > 4 else full_name
             except:
                 full_name = target_code
                 short_name = target_code
 
-            # --- 1. AIスクリーニングデータ (表) ---
+            # --- 1. AIスクリーニングデータ ---
             st.markdown("**AIスクリーニングデーター**")
             
             probs = {}
-            # 表示名を変更 (1M, 3M, 6M, 1Y)
             tgt_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
             
             for lbl, d in tgt_map.items():
@@ -129,7 +123,6 @@ if target_code:
                 pv = calculate_probability(curr, to_float(cl['yhat']), to_float(cl['yhat_lower']), to_float(cl['yhat_upper']))
                 probs[lbl] = pv
 
-            # 1行だけのデータフレーム作成
             screen_data = [{
                 "コード": target_code,
                 "企業名": short_name,
@@ -141,11 +134,11 @@ if target_code:
             }]
             st.dataframe(pd.DataFrame(screen_data), hide_index=True, use_container_width=True)
 
-            # --- 2. 詳細情報 (テキスト) ---
+            # --- 2. 詳細情報 ---
             st.markdown(f"**{full_name}**")
             st.write(f"現在値: {curr:,.0f} 円")
 
-            # --- 3. 過去の変動要因 (5%以上) ---
+            # --- 3. 過去の変動要因 ---
             st.markdown("**過去の変動要因**")
             
             df_hist['Change'] = df_hist[close_c].pct_change() * 100
@@ -162,7 +155,6 @@ if target_code:
                         "変動率": f"{row['Change']:+.1f}%",
                         "検索": url
                     })
-                
                 st.dataframe(
                     pd.DataFrame(m_res),
                     column_config={"検索": st.column_config.LinkColumn("検索", display_text="検索")},
@@ -172,10 +164,8 @@ if target_code:
             else:
                 st.write("※ 5%以上の変動なし")
 
-            # --- 4. 未来の予測 (テキスト羅列) ---
-            # タイトルなしでシンプルに表示
+            # --- 4. 未来の予測 ---
             fut_fcst = fcst[fcst['ds'] > last_d].copy()
-            
             for lbl, days in tgt_map.items():
                 tgt_d = last_d + timedelta(days=days)
                 diff = (fut_fcst['ds'] - tgt_d).abs()
@@ -184,30 +174,46 @@ if target_code:
                     row = fut_fcst.iloc[c_idx].iloc[0]
                     pred = to_float(row['yhat'])
                     pup = calculate_probability(curr, pred, to_float(row['yhat_lower']), to_float(row['yhat_upper']))
-                    
-                    # 1行で表示 (例: 1M後の予測: 3000円 91.8%)
                     st.write(f"**{lbl}後の予測**: {pred:,.0f}円  {pup:.1f}%")
 
-            # --- 5. 長期予測チャート ---
+            # --- 5. 長期予測チャート (ボタン追加版) ---
             st.markdown("**長期予測チャート**")
             fig = go.Figure()
-            # 実測値
+            # 実測
             fig.add_trace(go.Candlestick(x=df_hist[date_c], open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name='実測'))
             # AI予測
             fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat'], mode='lines', name='AI', line=dict(color='yellow', width=2)))
-            # 帯
+            # 予測帯
             fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat_upper'], mode='lines', line=dict(width=0), hoverinfo='skip', showlegend=False))
             fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(255, 255, 0, 0.2)', hoverinfo='skip', showlegend=False))
 
+            # --- チャート用ボタン設定 ---
+            # 期間に応じてボタンを調整 (3年データなら5Yボタンは不要だが、あっても害はないので汎用的に配置)
+            # スマホで見やすいように、チャートの頭にボタンを置く
             fig.update_layout(
                 template="plotly_dark",
-                height=400, # スマホ用に高さを抑える
-                margin=dict(l=0, r=0, t=30, b=0), # 余白削除
-                xaxis_rangeslider_visible=False, # スライダー削除してスッキリさせる
+                height=450, # ボタンが入る分少し高さを確保
+                margin=dict(l=0, r=0, t=50, b=0), # 上部ボタン用にスペース確保
+                xaxis=dict(
+                    rangeslider=dict(visible=False), # 下のスライダーは非表示
+                    rangeselector=dict(
+                        buttons=list([
+                            dict(count=1, label="1M", step="month", stepmode="backward"),
+                            dict(count=3, label="3M", step="month", stepmode="backward"),
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(count=1, label="1Y", step="year", stepmode="backward"),
+                            dict(count=3, label="3Y", step="year", stepmode="backward"),
+                            dict(count=5, label="5Y", step="year", stepmode="backward"),
+                            dict(step="all", label="All")
+                        ]),
+                        font=dict(color="black"), # ボタン文字色
+                        bgcolor="#eeeeee",        # ボタン背景色
+                        activecolor="#ff9900"     # 選択中の色
+                    ),
+                    type="date"
+                ),
                 showlegend=False
             )
-            # ズーム調整
-            fig.update_xaxes(range=[last_d - timedelta(days=365), last_d + timedelta(days=365)])
             st.plotly_chart(fig, use_container_width=True)
 
     except Exception as e:
