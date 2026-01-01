@@ -49,9 +49,9 @@ st.markdown("""
         font-weight: bold;
     }
     
-    /* 5. 余白調整（ここを修正：上部の余白を広げました） */
+    /* 5. 余白調整 */
     .block-container {
-        padding-top: 4rem; /* 1rem -> 4rem に変更してタイトルとの被りを解消 */
+        padding-top: 4rem;
         padding-bottom: 5rem;
         padding-left: 0.5rem;
         padding-right: 0.5rem;
@@ -63,8 +63,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- タイトル ---
+# --- タイトル & デモ版表記 ---
 st.markdown("### **東P株AIツール**")
+st.markdown("""
+<div style="margin-top: -15px; margin-bottom: 10px;">
+    <span style="font-size: 0.9rem;">デモ版</span><br>
+    <span style="font-size: 0.7rem; opacity: 0.8;">（※数値は過去にデーターによる予測したもので、保証するものではありません）</span>
+</div>
+""", unsafe_allow_html=True)
 
 # --- 期間選択 ---
 period_label = st.radio(
