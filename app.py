@@ -63,12 +63,12 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- タイトル & デモ版表記 ---
+# --- タイトル & デモ版表記 (修正済み) ---
 st.markdown("### **東P株AIツール**")
 st.markdown("""
 <div style="margin-top: -15px; margin-bottom: 10px;">
     <span style="font-size: 0.9rem;">デモ版</span><br>
-    <span style="font-size: 0.7rem; opacity: 0.8;">（※数値は過去にデーターによる予測したもので、保証するものではありません）</span>
+    <span style="font-size: 0.7rem; opacity: 0.8;">（※数値は過去データーから予測されたもので、結果を保証するものではありません）</span>
 </div>
 """, unsafe_allow_html=True)
 
