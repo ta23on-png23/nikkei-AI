@@ -7,16 +7,15 @@ import plotly.graph_objs as go
 from datetime import timedelta
 
 # ==========================================
-#  設定：パスワードとセキュリティ
+#  設定：パスワード
 # ==========================================
-# ★ここに設定したいパスワードを入れてください
+# ★ここに設定したいパスワードを入れてください（今は demo です）
 DEMO_PASSWORD = "demo" 
 
 # --- ページ設定 (必ず一番最初に書く) ---
 st.set_page_config(page_title="東P株AIツール", layout="wide")
 
-# --- UI非表示設定 (CSS) ---
-# これで設定メニューや下の管理バーを隠します
+# --- UI非表示 & 黒背景デザイン (CSS) ---
 hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -70,23 +69,24 @@ def check_password():
     if st.session_state.password_correct:
         return True
 
+    # パスワード入力画面
     st.markdown("### 🔒 デモ版アクセス制限")
     password = st.text_input("パスワードを入力してください", type="password")
     
     if password:
         if password == DEMO_PASSWORD:
             st.session_state.password_correct = True
-            st.rerun() # 再読み込みしてアプリを表示
+            st.rerun()
         else:
             st.error("パスワードが違います")
     return False
 
-# パスワードが通っていない場合はここで処理を止める（アプリの中身を見せない）
+# 認証チェック（通らないとここで止まる）
 if not check_password():
     st.stop()
 
 # ==========================================
-#  以下、メインアプリの処理 (認証成功後に実行)
+#  メインアプリ処理
 # ==========================================
 
 # --- 安全な数値変換関数 ---
@@ -133,7 +133,7 @@ def calculate_probability(current_price, predicted_price, lower_bound, upper_bou
     z_score = (p - c) / sigma
     return norm.cdf(z_score) * 100
 
-# --- AI要因判定関数 (簡潔版) ---
+# --- AI要因判定関数 ---
 def get_ai_reasons_short(forecast, target_date, current_price, predicted_price):
     tags = []
     target_row = forecast.iloc[(forecast['ds'] - target_date).abs().argsort()[:1]].iloc[0]
@@ -155,159 +155,164 @@ def get_ai_reasons_short(forecast, target_date, current_price, predicted_price):
 if target_code:
     ticker = f"{target_code}.T"
     
+    # データのダウンロードとエラーハンドリング
     try:
-        with st.spinner('Calculating...'):
+        with st.spinner('AIが計算中...'):
             df_hist = yf.download(ticker, period=period_str, interval="1d", progress=False)
-            
-        if len(df_hist) > 50:
-            # --- データ整形 ---
-            df_hist = df_hist.reset_index()
-            if isinstance(df_hist.columns, pd.MultiIndex):
-                df_hist.columns = df_hist.columns.get_level_values(0)
-            
-            cols = {c.lower(): c for c in df_hist.columns}
-            date_c = next((c for k, c in cols.items() if 'date' in k), df_hist.columns[0])
-            close_c = next((c for k, c in cols.items() if 'close' in k), df_hist.columns[1])
-            
-            df_p = pd.DataFrame()
-            df_p['ds'] = pd.to_datetime(df_hist[date_c]).dt.tz_localize(None)
-            df_p['y'] = df_hist[close_c]
-            
-            curr = to_float(df_p['y'].iloc[-1])
-            last_d = df_p['ds'].iloc[-1]
-            
-            # --- AI予測 ---
-            m = Prophet(changepoint_prior_scale=0.05, daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
-            m.fit(df_p)
-            fut = m.make_future_dataframe(periods=366, freq='D')
-            fcst = m.predict(fut)
+        
+        # 【重要】データが空っぽだった場合の処理を追加
+        if df_hist.empty:
+            st.error(f"データが見つかりません。コード「{target_code}」を確認してください。")
+            st.stop()
 
-            # --- 企業名取得 ---
-            try:
-                info = yf.Ticker(ticker)
-                full_name = info.info.get('longName', target_code)
-                short_name = full_name[:4] + "..." if len(full_name) > 4 else full_name
-            except:
-                full_name, short_name = target_code, target_code
+        # データ数が少なすぎる場合
+        if len(df_hist) < 30:
+            st.error("分析に必要なデータ数が足りません（上場直後などの可能性があります）。")
+            st.stop()
 
-            # --- 1. AIスクリーニングデータ ---
-            st.markdown("#### **AIスクリーニングデーター**")
-            
-            probs = {}
-            tgt_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
-            
-            for lbl, d in tgt_map.items():
-                tgt_d = last_d + timedelta(days=d)
-                diff = (fcst['ds'] - tgt_d).abs()
-                c_idx = diff.argsort()[:1]
-                cl = fcst.iloc[c_idx].iloc[0]
-                pv = calculate_probability(curr, to_float(cl['yhat']), to_float(cl['yhat_lower']), to_float(cl['yhat_upper']))
-                probs[lbl] = pv
+        # --- データ整形 ---
+        df_hist = df_hist.reset_index()
+        if isinstance(df_hist.columns, pd.MultiIndex):
+            df_hist.columns = df_hist.columns.get_level_values(0)
+        
+        cols = {c.lower(): c for c in df_hist.columns}
+        date_c = next((c for k, c in cols.items() if 'date' in k), df_hist.columns[0])
+        close_c = next((c for k, c in cols.items() if 'close' in k), df_hist.columns[1])
+        
+        df_p = pd.DataFrame()
+        df_p['ds'] = pd.to_datetime(df_hist[date_c]).dt.tz_localize(None)
+        df_p['y'] = df_hist[close_c]
+        
+        curr = to_float(df_p['y'].iloc[-1])
+        last_d = df_p['ds'].iloc[-1]
+        
+        # --- AI予測 ---
+        m = Prophet(changepoint_prior_scale=0.05, daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
+        m.fit(df_p)
+        fut = m.make_future_dataframe(periods=366, freq='D')
+        fcst = m.predict(fut)
 
-            screen_data = [{
-                "コード": target_code,
-                "企業名": short_name,
-                "現在値": f"{curr:,.0f}",
-                "1M": f"{probs['1M']:.1f}%",
-                "3M": f"{probs['3M']:.1f}%",
-                "6M": f"{probs['6M']:.1f}%",
-                "1Y": f"{probs['1Y']:.1f}%",
-            }]
-            st.dataframe(pd.DataFrame(screen_data), hide_index=True, use_container_width=True)
+        # --- 企業名取得 ---
+        try:
+            info = yf.Ticker(ticker)
+            full_name = info.info.get('longName', target_code)
+            short_name = full_name[:4] + "..." if len(full_name) > 4 else full_name
+        except:
+            full_name, short_name = target_code, target_code
 
-            # --- 2. 詳細情報 ---
-            st.markdown(f"#### **{full_name}**")
-            st.write(f"**現在値: {curr:,.0f} 円**")
+        # --- 1. AIスクリーニングデータ ---
+        st.markdown("#### **AIスクリーニングデーター**")
+        
+        probs = {}
+        tgt_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
+        
+        for lbl, d in tgt_map.items():
+            tgt_d = last_d + timedelta(days=d)
+            diff = (fcst['ds'] - tgt_d).abs()
+            c_idx = diff.argsort()[:1]
+            cl = fcst.iloc[c_idx].iloc[0]
+            pv = calculate_probability(curr, to_float(cl['yhat']), to_float(cl['yhat_lower']), to_float(cl['yhat_upper']))
+            probs[lbl] = pv
 
-            # --- 3. 過去の変動要因 ---
-            st.markdown("#### **過去の変動要因**")
-            df_hist['Change'] = df_hist[close_c].pct_change() * 100
-            big_moves = df_hist[df_hist['Change'].abs() >= 5.0].copy().sort_values(date_c, ascending=False)
-            
-            if not big_moves.empty:
-                m_res = []
-                for idx, row in big_moves.iterrows():
-                    d_str = row[date_c].strftime('%Y-%m-%d')
-                    move = "急騰" if row['Change'] > 0 else "急落"
-                    url = f"https://www.google.com/search?q={full_name} {d_str} 株価 {move} 理由"
-                    m_res.append({"日時": d_str, "変動率": f"{row['Change']:+.1f}%", "検索": url})
-                st.dataframe(pd.DataFrame(m_res), column_config={"検索": st.column_config.LinkColumn("検索", display_text="検索")}, hide_index=True, use_container_width=True)
-            else:
-                st.write("※ 5%以上の変動なし")
+        screen_data = [{
+            "コード": target_code,
+            "企業名": short_name,
+            "現在値": f"{curr:,.0f}",
+            "1M": f"{probs['1M']:.1f}%",
+            "3M": f"{probs['3M']:.1f}%",
+            "6M": f"{probs['6M']:.1f}%",
+            "1Y": f"{probs['1Y']:.1f}%",
+        }]
+        st.dataframe(pd.DataFrame(screen_data), hide_index=True, use_container_width=True)
 
-            # --- 4. 未来の予測 (要因付き) ---
-            st.markdown("#### **未来の予測**")
-            fut_fcst = fcst[fcst['ds'] > last_d].copy()
-            
-            for lbl, days in tgt_map.items():
-                tgt_d = last_d + timedelta(days=days)
-                diff = (fut_fcst['ds'] - tgt_d).abs()
-                c_idx = diff.argsort()[:1]
-                if len(c_idx) > 0:
-                    row = fut_fcst.iloc[c_idx].iloc[0]
-                    pred = to_float(row['yhat'])
-                    pup = calculate_probability(curr, pred, to_float(row['yhat_lower']), to_float(row['yhat_upper']))
-                    reasons = get_ai_reasons_short(fcst, tgt_d, curr, pred)
-                    
-                    st.markdown(f"""
-                    <div style="margin-bottom: 15px;">
-                        <div style="font-size: 1.1rem; font-weight: bold;">
-                            {lbl}後の予測: {pred:,.0f}円  {pup:.1f}%
-                        </div>
-                        <div style="font-size: 0.95rem; color: #dddddd; margin-left: 15px;">
-                            └ 要因: {reasons}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+        # --- 2. 詳細情報 ---
+        st.markdown(f"#### **{full_name}**")
+        st.write(f"**現在値: {curr:,.0f} 円**")
 
-            # --- 5. 長期予測チャート (修正版) ---
-            st.markdown("#### **長期予測チャート**")
+        # --- 3. 過去の変動要因 ---
+        st.markdown("#### **過去の変動要因**")
+        df_hist['Change'] = df_hist[close_c].pct_change() * 100
+        big_moves = df_hist[df_hist['Change'].abs() >= 5.0].copy().sort_values(date_c, ascending=False)
+        
+        if not big_moves.empty:
+            m_res = []
+            for idx, row in big_moves.iterrows():
+                d_str = row[date_c].strftime('%Y-%m-%d')
+                move = "急騰" if row['Change'] > 0 else "急落"
+                url = f"https://www.google.com/search?q={full_name} {d_str} 株価 {move} 理由"
+                m_res.append({"日時": d_str, "変動率": f"{row['Change']:+.1f}%", "検索": url})
+            st.dataframe(pd.DataFrame(m_res), column_config={"検索": st.column_config.LinkColumn("検索", display_text="検索")}, hide_index=True, use_container_width=True)
+        else:
+            st.write("※ 5%以上の変動なし")
 
-            # チャート期間選択用のボタン
-            zoom_period = st.radio(
-                "表示期間",
-                ["1M", "3M", "6M", "1Y", "3Y", "ALL"],
-                index=3, # デフォルト1Y
-                horizontal=True,
-                label_visibility="collapsed"
-            )
-
-            # 表示範囲の計算
-            days_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "3Y": 365*3, "ALL": 365*5}
-            
-            if zoom_period == "ALL":
-                x_start = df_hist[date_c].min()
-                x_end = fcst['ds'].max()
-            else:
-                days = days_map[zoom_period]
-                x_start = last_d - timedelta(days=days)
-                x_end = last_d + timedelta(days=days) 
+        # --- 4. 未来の予測 (要因付き) ---
+        st.markdown("#### **未来の予測**")
+        fut_fcst = fcst[fcst['ds'] > last_d].copy()
+        
+        for lbl, days in tgt_map.items():
+            tgt_d = last_d + timedelta(days=days)
+            diff = (fut_fcst['ds'] - tgt_d).abs()
+            c_idx = diff.argsort()[:1]
+            if len(c_idx) > 0:
+                row = fut_fcst.iloc[c_idx].iloc[0]
+                pred = to_float(row['yhat'])
+                pup = calculate_probability(curr, pred, to_float(row['yhat_lower']), to_float(row['yhat_upper']))
+                reasons = get_ai_reasons_short(fcst, tgt_d, curr, pred)
                 
-            fig = go.Figure()
-            # 実測
-            fig.add_trace(go.Candlestick(x=df_hist[date_c], open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name='実測'))
-            # AI予測
-            fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat'], mode='lines', name='AI', line=dict(color='yellow', width=2)))
-            # 予測帯
-            fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat_upper'], mode='lines', line=dict(width=0), hoverinfo='skip', showlegend=False))
-            fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(255, 255, 0, 0.2)', hoverinfo='skip', showlegend=False))
+                st.markdown(f"""
+                <div style="margin-bottom: 15px;">
+                    <div style="font-size: 1.1rem; font-weight: bold;">
+                        {lbl}後の予測: {pred:,.0f}円  {pup:.1f}%
+                    </div>
+                    <div style="font-size: 0.95rem; color: #dddddd; margin-left: 15px;">
+                        └ 要因: {reasons}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
-            fig.update_layout(
-                template="plotly_dark",
-                height=450, 
-                margin=dict(l=0, r=0, t=10, b=0),
-                xaxis=dict(
-                    rangeslider=dict(visible=False), 
-                    range=[x_start, x_end],
-                    type="date",
-                    fixedrange=True
-                ),
-                yaxis=dict(
-                    fixedrange=True
-                ),
-                showlegend=False
-            )
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'staticPlot': False, 'scrollZoom': False})
+        # --- 5. 長期予測チャート (ボタン追加版) ---
+        st.markdown("#### **長期予測チャート**")
+
+        zoom_period = st.radio(
+            "表示期間",
+            ["1M", "3M", "6M", "1Y", "3Y", "ALL"],
+            index=3,
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+
+        days_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "3Y": 365*3, "ALL": 365*5}
+        
+        if zoom_period == "ALL":
+            x_start = df_hist[date_c].min()
+            x_end = fcst['ds'].max()
+        else:
+            days = days_map[zoom_period]
+            x_start = last_d - timedelta(days=days)
+            x_end = last_d + timedelta(days=days) 
+            
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(x=df_hist[date_c], open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name='実測'))
+        fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat'], mode='lines', name='AI', line=dict(color='yellow', width=2)))
+        fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat_upper'], mode='lines', line=dict(width=0), hoverinfo='skip', showlegend=False))
+        fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(255, 255, 0, 0.2)', hoverinfo='skip', showlegend=False))
+
+        fig.update_layout(
+            template="plotly_dark",
+            height=450, 
+            margin=dict(l=0, r=0, t=10, b=0),
+            xaxis=dict(
+                rangeslider=dict(visible=False), 
+                range=[x_start, x_end],
+                type="date",
+                fixedrange=True
+            ),
+            yaxis=dict(
+                fixedrange=True
+            ),
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'staticPlot': False, 'scrollZoom': False})
 
     except Exception as e:
-        st.error(f"データ取得エラー: {e}")
+        st.error(f"システムエラーが発生しました: {e}")
