@@ -98,17 +98,14 @@ def calculate_probability(current_price, predicted_price, lower_bound, upper_bou
 # --- AI要因判定関数 (簡潔版) ---
 def get_ai_reasons_short(forecast, target_date, current_price, predicted_price):
     tags = []
-    # 最も近い予測行を取得
     target_row = forecast.iloc[(forecast['ds'] - target_date).abs().argsort()[:1]].iloc[0]
     
-    # 1. トレンド判定
     diff_pct = ((predicted_price - current_price) / current_price) * 100
     if diff_pct > 5.0: tags.append("上昇トレンド")
     elif diff_pct > 0: tags.append("緩やかな上昇")
     elif diff_pct < -5.0: tags.append("下落/調整局面")
     else: tags.append("レンジ/横ばい")
 
-    # 2. 季節性判定
     if 'yearly' in target_row:
         y_eff = target_row['yearly']
         if y_eff > 0: tags.append("季節性(良)")
@@ -212,7 +209,6 @@ if target_code:
                     row = fut_fcst.iloc[c_idx].iloc[0]
                     pred = to_float(row['yhat'])
                     pup = calculate_probability(curr, pred, to_float(row['yhat_lower']), to_float(row['yhat_upper']))
-                    
                     reasons = get_ai_reasons_short(fcst, tgt_d, curr, pred)
                     
                     st.markdown(f"""
@@ -226,44 +222,42 @@ if target_code:
                     </div>
                     """, unsafe_allow_html=True)
 
-            # --- 5. 長期予測チャート (固定モード) ---
+            # --- 5. 長期予測チャート (修正版) ---
             st.markdown("#### **長期予測チャート**")
+
+            # ★チャート期間選択用のボタン（Streamlitのラジオボタン）
+            zoom_period = st.radio(
+                "表示期間",
+                ["1M", "3M", "6M", "1Y", "3Y", "ALL"],
+                index=3, # デフォルト1Y
+                horizontal=True,
+                label_visibility="collapsed"
+            )
+
+            # ★選択された期間に基づいて表示範囲を計算
+            # 「直近データ(last_d)」を中心に、過去と未来を表示する
+            days_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "3Y": 365*3, "ALL": 365*5}
+            
+            if zoom_period == "ALL":
+                # 全期間
+                x_start = df_hist[date_c].min()
+                x_end = fcst['ds'].max()
+            else:
+                days = days_map[zoom_period]
+                # 過去X日 〜 未来X日（ただし未来は予測データの最後まで）
+                x_start = last_d - timedelta(days=days)
+                x_end = last_d + timedelta(days=days) 
+                
             fig = go.Figure()
+            # 実測
             fig.add_trace(go.Candlestick(x=df_hist[date_c], open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name='実測'))
+            # AI予測
             fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat'], mode='lines', name='AI', line=dict(color='yellow', width=2)))
+            # 予測帯
             fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat_upper'], mode='lines', line=dict(width=0), hoverinfo='skip', showlegend=False))
             fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(255, 255, 0, 0.2)', hoverinfo='skip', showlegend=False))
 
             fig.update_layout(
                 template="plotly_dark",
                 height=450, 
-                margin=dict(l=0, r=0, t=50, b=0),
-                xaxis=dict(
-                    rangeslider=dict(visible=False), 
-                    rangeselector=dict(
-                        buttons=list([
-                            dict(count=1, label="1M", step="month", stepmode="backward"),
-                            dict(count=3, label="3M", step="month", stepmode="backward"),
-                            dict(count=6, label="6M", step="month", stepmode="backward"),
-                            dict(count=1, label="1Y", step="year", stepmode="backward"),
-                            dict(count=3, label="3Y", step="year", stepmode="backward"),
-                            dict(count=5, label="5Y", step="year", stepmode="backward"),
-                            dict(step="all", label="All")
-                        ]),
-                        font=dict(color="black", size=11), 
-                        bgcolor="#eeeeee",        
-                        activecolor="#ff9900"     
-                    ),
-                    type="date",
-                    fixedrange=True # ★ここが重要：X軸の操作を無効化
-                ),
-                yaxis=dict(
-                    fixedrange=True # ★ここが重要：Y軸の操作を無効化
-                ),
-                showlegend=False
-            )
-            # configでさらに確実に無効化
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'staticPlot': False, 'scrollZoom': False})
-
-    except Exception as e:
-        st.error(f"データ取得エラー: {e}")
+                margin=dict(l=0, r
