@@ -225,7 +225,7 @@ if target_code:
             # --- 5. 長期予測チャート (修正版) ---
             st.markdown("#### **長期予測チャート**")
 
-            # ★チャート期間選択用のボタン（Streamlitのラジオボタン）
+            # チャート期間選択用のボタン
             zoom_period = st.radio(
                 "表示期間",
                 ["1M", "3M", "6M", "1Y", "3Y", "ALL"],
@@ -234,17 +234,14 @@ if target_code:
                 label_visibility="collapsed"
             )
 
-            # ★選択された期間に基づいて表示範囲を計算
-            # 「直近データ(last_d)」を中心に、過去と未来を表示する
+            # 表示範囲の計算
             days_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "3Y": 365*3, "ALL": 365*5}
             
             if zoom_period == "ALL":
-                # 全期間
                 x_start = df_hist[date_c].min()
                 x_end = fcst['ds'].max()
             else:
                 days = days_map[zoom_period]
-                # 過去X日 〜 未来X日（ただし未来は予測データの最後まで）
                 x_start = last_d - timedelta(days=days)
                 x_end = last_d + timedelta(days=days) 
                 
@@ -260,4 +257,19 @@ if target_code:
             fig.update_layout(
                 template="plotly_dark",
                 height=450, 
-                margin=dict(l=0, r
+                margin=dict(l=0, r=0, t=10, b=0),
+                xaxis=dict(
+                    rangeslider=dict(visible=False), 
+                    range=[x_start, x_end],
+                    type="date",
+                    fixedrange=True
+                ),
+                yaxis=dict(
+                    fixedrange=True
+                ),
+                showlegend=False
+            )
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'staticPlot': False, 'scrollZoom': False})
+
+    except Exception as e:
+        st.error(f"データ取得エラー: {e}")
