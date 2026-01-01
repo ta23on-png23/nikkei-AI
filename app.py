@@ -63,7 +63,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- タイトル & デモ版表記 (修正済み) ---
+# --- タイトル & デモ版表記 ---
 st.markdown("### **東P株AIツール**")
 st.markdown("""
 <div style="margin-top: -15px; margin-bottom: 10px;">
@@ -226,7 +226,7 @@ if target_code:
                     </div>
                     """, unsafe_allow_html=True)
 
-            # --- 5. 長期予測チャート ---
+            # --- 5. 長期予測チャート (固定モード) ---
             st.markdown("#### **長期予測チャート**")
             fig = go.Figure()
             fig.add_trace(go.Candlestick(x=df_hist[date_c], open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name='実測'))
@@ -254,11 +254,16 @@ if target_code:
                         bgcolor="#eeeeee",        
                         activecolor="#ff9900"     
                     ),
-                    type="date"
+                    type="date",
+                    fixedrange=True # ★ここが重要：X軸の操作を無効化
+                ),
+                yaxis=dict(
+                    fixedrange=True # ★ここが重要：Y軸の操作を無効化
                 ),
                 showlegend=False
             )
-            st.plotly_chart(fig, use_container_width=True)
+            # configでさらに確実に無効化
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'staticPlot': False, 'scrollZoom': False})
 
     except Exception as e:
         st.error(f"データ取得エラー: {e}")
