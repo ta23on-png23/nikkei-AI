@@ -49,9 +49,9 @@ st.markdown("""
         font-weight: bold;
     }
     
-    /* 5. 余白調整 */
+    /* 5. 余白調整（ここを修正：上部の余白を広げました） */
     .block-container {
-        padding-top: 1rem;
+        padding-top: 4rem; /* 1rem -> 4rem に変更してタイトルとの被りを解消 */
         padding-bottom: 5rem;
         padding-left: 0.5rem;
         padding-right: 0.5rem;
@@ -89,7 +89,7 @@ def calculate_probability(current_price, predicted_price, lower_bound, upper_bou
     z_score = (p - c) / sigma
     return norm.cdf(z_score) * 100
 
-# --- ★AI要因判定関数 (簡潔版) ---
+# --- AI要因判定関数 (簡潔版) ---
 def get_ai_reasons_short(forecast, target_date, current_price, predicted_price):
     tags = []
     # 最も近い予測行を取得
@@ -207,10 +207,8 @@ if target_code:
                     pred = to_float(row['yhat'])
                     pup = calculate_probability(curr, pred, to_float(row['yhat_lower']), to_float(row['yhat_upper']))
                     
-                    # 要因を取得
                     reasons = get_ai_reasons_short(fcst, tgt_d, curr, pred)
                     
-                    # HTMLを使って綺麗にレイアウト (予測値の下に要因)
                     st.markdown(f"""
                     <div style="margin-bottom: 15px;">
                         <div style="font-size: 1.1rem; font-weight: bold;">
