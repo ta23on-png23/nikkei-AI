@@ -1,6 +1,4 @@
 streamlit
 yfinance
-prophet
-plotly
 pandas
-scipy
+google-generativeai
