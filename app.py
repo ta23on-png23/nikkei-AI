@@ -1,318 +1,294 @@
 import streamlit as st
 import yfinance as yf
-from prophet import Prophet
 import pandas as pd
-from scipy.stats import norm
-import plotly.graph_objs as go
-from datetime import timedelta
+import pytz
+from datetime import datetime
+import google.generativeai as genai
 
-# ==========================================
-#  設定：パスワード
-# ==========================================
-# ★ここに設定したいパスワードを入れてください（今は demo です）
-DEMO_PASSWORD = "demo" 
+# ---------------------------------------------------------
+# 【設定エリア】
+# ---------------------------------------------------------
+st.set_page_config(page_title="底値シグナル分析AI", layout="wide")
 
-# --- ページ設定 (必ず一番最初に書く) ---
-st.set_page_config(page_title="東P株AIツール", layout="wide")
+# ★Gemini APIの設定
+try:
+    if "GEMINI_API_KEY" in st.secrets:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        model = genai.GenerativeModel("gemini-pro")
+        gemini_available = True
+    else:
+        gemini_available = False
+except:
+    gemini_available = False
 
-# --- UI非表示 & 黒背景デザイン (CSS) ---
-hide_streamlit_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            div[data-testid="stToolbar"] {visibility: hidden;}
-            .stDeployButton {display:none;}
-            
-            /* アプリ全体の背景黒・文字白 */
-            .stApp {
-                background-color: #000000;
-                color: #ffffff;
-            }
-            /* 全てのテキストを白く・太く */
-            h1, h2, h3, h4, h5, h6, p, div, span, label, li {
-                color: #ffffff !important;
-                font-family: sans-serif;
-            }
-            /* ラジオボタン */
-            div[data-testid="stRadio"] label p {
-                font-weight: bold !important;
-                font-size: 1.1rem !important;
-                color: #ffffff !important;
-            }
-            /* 入力ボックス */
-            .stTextInput > div > div > input {
-                color: #ffffff !important;
-                background-color: #333333;
-                font-weight: bold;
-            }
-            /* 余白調整 */
-            .block-container {
-                padding-top: 2rem;
-                padding-bottom: 5rem;
-                padding-left: 0.5rem;
-                padding-right: 0.5rem;
-            }
-            /* テーブルヘッダー非表示 */
-            thead tr th:first-child {display:none}
-            tbody th {display:none}
-            </style>
-            """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+# ★企業名・業種名のマッピング
+NAME_MAP = {
+    "1617.T": "食品", "1618.T": "エネ資源", "1619.T": "建設・資材",
+    "1620.T": "素材・化学", "1621.T": "医薬品", "1622.T": "自動車・輸送",
+    "1623.T": "鉄鋼・非鉄", "1624.T": "機械", "1625.T": "電機・精密",
+    "1626.T": "IT・通信", "1627.T": "電力・ガス", "1628.T": "運輸・物流",
+    "1629.T": "商社・卸売", "1630.T": "小売", "1631.T": "銀行",
+    "1632.T": "金融(除銀行)", "1633.T": "不動産",
+    "1326.T": "SPDRゴールド", "1407.T": "ウエストHD", "1419.T": "タマホーム",
+    "1489.T": "NF日経高配当50", "1605.T": "INPEX", "1678.T": "NFインド株",
+    "2267.T": "ヤクルト", "2516.T": "東証グロース250", "2801.T": "キッコーマン",
+    "2897.T": "日清食品HD", "3038.T": "神戸物産", "3099.T": "三越伊勢丹",
+    "3382.T": "セブン&アイ", "3397.T": "トリドール", "4045.T": "東亞合成",
+    "4543.T": "テルモ", "6758.T": "ソニーG", "7203.T": "トヨタ自動車",
+    "7261.T": "マツダ", "7267.T": "ホンダ", "7272.T": "ヤマハ発動機",
+    "7532.T": "パンパシHD", "7630.T": "壱番屋", "7990.T": "グローブライド",
+    "8031.T": "三井物産", "8113.T": "ユニ・チャーム", "8200.T": "リンガーハット",
+    "8242.T": "H2Oリテイリング", "8306.T": "三菱UFJ", "8591.T": "オリックス",
+    "8593.T": "三菱HCキャピタル", "8729.T": "ソニーFH", "9041.T": "近鉄GHD",
+    "9142.T": "JR九州", "9202.T": "ANAホールディングス", "9432.T": "日本電信電話",
+    "9434.T": "ソフトバンク", "9828.T": "元気寿司", "9850.T": "グルメ杵屋",
+    "9861.T": "吉野家HD", "9887.T": "松屋フーズ", "9936.T": "王将フード",
+    "9984.T": "ソフトバンクG",
+}
 
-# --- パスワード認証機能 ---
-def check_password():
-    """パスワードが正しいかチェックする関数"""
-    if "password_correct" not in st.session_state:
-        st.session_state.password_correct = False
+SECTOR_ETFS = [
+    "1617.T", "1618.T", "1619.T", "1620.T", "1621.T", "1622.T",
+    "1623.T", "1624.T", "1625.T", "1626.T", "1627.T", "1628.T",
+    "1629.T", "1630.T", "1631.T", "1632.T", "1633.T"
+]
 
-    if st.session_state.password_correct:
-        return True
+MY_STOCKS = [
+    "1326.T", "1407.T", "1419.T", "1489.T", "1605.T", "1678.T", 
+    "2267.T", "2516.T", "2801.T", "2897.T", "3038.T", "3099.T", 
+    "3382.T", "3397.T", "4045.T", "4543.T", "7203.T", "7261.T", 
+    "7267.T", "7272.T", "7532.T", "7630.T", "7990.T", "8031.T", 
+    "8113.T", "8200.T", "8242.T", "8591.T", "8593.T", "8729.T", 
+    "9041.T", "9142.T", "9202.T", "9432.T", "9434.T", "9828.T", 
+    "9850.T", "9861.T", "9887.T", "9936.T"
+]
 
-    # パスワード入力画面
-    st.markdown("### 🔒 デモ版アクセス制限")
-    password = st.text_input("パスワードを入力してください", type="password")
-    
-    if password:
-        if password == DEMO_PASSWORD:
-            st.session_state.password_correct = True
+USER_SETTINGS = {
+    "demo": MY_STOCKS, 
+    "apple01": ["7203.T", "6758.T", "8306.T"],
+}
+
+# ---------------------------------------------------------
+# 関数定義
+# ---------------------------------------------------------
+def check_login():
+    if "authenticated" not in st.session_state:
+        st.session_state["authenticated"] = False
+        st.session_state["user_stocks"] = []
+
+    if st.session_state["authenticated"]:
+        return st.session_state["user_stocks"]
+
+    st.write("### 🔒 会員限定エリア")
+    password_input = st.text_input("アクセスキーを入力してください", type="password")
+    if st.button("ログイン"):
+        if password_input in USER_SETTINGS:
+            st.session_state["authenticated"] = True
+            st.session_state["user_stocks"] = USER_SETTINGS[password_input]
+            st.success("ログイン成功！")
             st.rerun()
         else:
             st.error("パスワードが違います")
-    return False
+    return None
 
-# 認証チェック（通らないとここで止まる）
-if not check_password():
-    st.stop()
-
-# ==========================================
-#  メインアプリ処理
-# ==========================================
-
-# --- 安全な数値変換関数 ---
-def to_float(x):
-    try:
-        if isinstance(x, float): return x
-        if isinstance(x, (pd.Series, pd.DataFrame)):
-            if x.empty: return 0.0
-            return float(x.to_numpy()[0])
-        if hasattr(x, 'item'): return float(x.item())
-        if isinstance(x, list): return float(x[0])
-        return float(x)
-    except: return 0.0
-
-# --- タイトル & デモ版表記 ---
-st.markdown("### **東P株AIツール**")
-st.markdown("""
-<div style="margin-top: -15px; margin-bottom: 10px;">
-    <span style="font-size: 0.9rem;">デモ版</span><br>
-    <span style="font-size: 0.7rem; opacity: 0.8;">（※数値は過去データーから予測されたもので、結果を保証するものではありません）</span>
-</div>
-""", unsafe_allow_html=True)
-
-# --- 期間選択 ---
-period_label = st.radio(
-    "期間選択",
-    ("3年", "5年"),
-    index=0,
-    horizontal=True,
-    label_visibility="collapsed"
-)
-period_select = int(period_label.replace("年", ""))
-period_str = f"{period_select}y"
-st.write(f"**※ 過去{period_select}年データで分析**")
-
-# --- 入力エリア ---
-target_code = st.text_input("銘柄コード", "7203")
-
-# --- 確率計算関数 ---
-def calculate_probability(current_price, predicted_price, lower_bound, upper_bound):
-    c, p, l, u = to_float(current_price), to_float(predicted_price), to_float(lower_bound), to_float(upper_bound)
-    sigma = (u - l) / 2.56
-    if sigma == 0: return 50.0
-    z_score = (p - c) / sigma
-    return norm.cdf(z_score) * 100
-
-# --- AI要因判定関数 ---
-def get_ai_reasons_short(forecast, target_date, current_price, predicted_price):
-    tags = []
-    target_row = forecast.iloc[(forecast['ds'] - target_date).abs().argsort()[:1]].iloc[0]
+def analyze_market(ticker_list, period, progress_bar_obj, start_progress, end_progress, get_fundamentals=False):
+    results = []
+    total = len(ticker_list)
+    if total == 0: return []
+    step = (end_progress - start_progress) / total
     
-    diff_pct = ((predicted_price - current_price) / current_price) * 100
-    if diff_pct > 5.0: tags.append("上昇トレンド")
-    elif diff_pct > 0: tags.append("緩やかな上昇")
-    elif diff_pct < -5.0: tags.append("下落/調整局面")
-    else: tags.append("レンジ/横ばい")
-
-    if 'yearly' in target_row:
-        y_eff = target_row['yearly']
-        if y_eff > 0: tags.append("季節性(良)")
-        elif y_eff < 0: tags.append("季節性(悪)")
-    
-    return "・".join(tags)
-
-# --- メイン処理 ---
-if target_code:
-    ticker = f"{target_code}.T"
-    
-    # データのダウンロードとエラーハンドリング
-    try:
-        with st.spinner('AIが計算中...'):
-            df_hist = yf.download(ticker, period=period_str, interval="1d", progress=False)
-        
-        # 【重要】データが空っぽだった場合の処理を追加
-        if df_hist.empty:
-            st.error(f"データが見つかりません。コード「{target_code}」を確認してください。")
-            st.stop()
-
-        # データ数が少なすぎる場合
-        if len(df_hist) < 30:
-            st.error("分析に必要なデータ数が足りません（上場直後などの可能性があります）。")
-            st.stop()
-
-        # --- データ整形 ---
-        df_hist = df_hist.reset_index()
-        if isinstance(df_hist.columns, pd.MultiIndex):
-            df_hist.columns = df_hist.columns.get_level_values(0)
-        
-        cols = {c.lower(): c for c in df_hist.columns}
-        date_c = next((c for k, c in cols.items() if 'date' in k), df_hist.columns[0])
-        close_c = next((c for k, c in cols.items() if 'close' in k), df_hist.columns[1])
-        
-        df_p = pd.DataFrame()
-        df_p['ds'] = pd.to_datetime(df_hist[date_c]).dt.tz_localize(None)
-        df_p['y'] = df_hist[close_c]
-        
-        curr = to_float(df_p['y'].iloc[-1])
-        last_d = df_p['ds'].iloc[-1]
-        
-        # --- AI予測 ---
-        m = Prophet(changepoint_prior_scale=0.05, daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
-        m.fit(df_p)
-        fut = m.make_future_dataframe(periods=366, freq='D')
-        fcst = m.predict(fut)
-
-        # --- 企業名取得 ---
+    for i, ticker in enumerate(ticker_list):
         try:
-            info = yf.Ticker(ticker)
-            full_name = info.info.get('longName', target_code)
-            short_name = full_name[:4] + "..." if len(full_name) > 4 else full_name
-        except:
-            full_name, short_name = target_code, target_code
-
-        # --- 1. AIスクリーニングデータ ---
-        st.markdown("#### **AIスクリーニングデーター**")
-        
-        probs = {}
-        tgt_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
-        
-        for lbl, d in tgt_map.items():
-            tgt_d = last_d + timedelta(days=d)
-            diff = (fcst['ds'] - tgt_d).abs()
-            c_idx = diff.argsort()[:1]
-            cl = fcst.iloc[c_idx].iloc[0]
-            pv = calculate_probability(curr, to_float(cl['yhat']), to_float(cl['yhat_lower']), to_float(cl['yhat_upper']))
-            probs[lbl] = pv
-
-        screen_data = [{
-            "コード": target_code,
-            "企業名": short_name,
-            "現在値": f"{curr:,.0f}",
-            "1M": f"{probs['1M']:.1f}%",
-            "3M": f"{probs['3M']:.1f}%",
-            "6M": f"{probs['6M']:.1f}%",
-            "1Y": f"{probs['1Y']:.1f}%",
-        }]
-        st.dataframe(pd.DataFrame(screen_data), hide_index=True, use_container_width=True)
-
-        # --- 2. 詳細情報 ---
-        st.markdown(f"#### **{full_name}**")
-        st.write(f"**現在値: {curr:,.0f} 円**")
-
-        # --- 3. 過去の変動要因 ---
-        st.markdown("#### **過去の変動要因**")
-        df_hist['Change'] = df_hist[close_c].pct_change() * 100
-        big_moves = df_hist[df_hist['Change'].abs() >= 5.0].copy().sort_values(date_c, ascending=False)
-        
-        if not big_moves.empty:
-            m_res = []
-            for idx, row in big_moves.iterrows():
-                d_str = row[date_c].strftime('%Y-%m-%d')
-                move = "急騰" if row['Change'] > 0 else "急落"
-                url = f"https://www.google.com/search?q={full_name} {d_str} 株価 {move} 理由"
-                m_res.append({"日時": d_str, "変動率": f"{row['Change']:+.1f}%", "検索": url})
-            st.dataframe(pd.DataFrame(m_res), column_config={"検索": st.column_config.LinkColumn("検索", display_text="検索")}, hide_index=True, use_container_width=True)
-        else:
-            st.write("※ 5%以上の変動なし")
-
-        # --- 4. 未来の予測 (要因付き) ---
-        st.markdown("#### **未来の予測**")
-        fut_fcst = fcst[fcst['ds'] > last_d].copy()
-        
-        for lbl, days in tgt_map.items():
-            tgt_d = last_d + timedelta(days=days)
-            diff = (fut_fcst['ds'] - tgt_d).abs()
-            c_idx = diff.argsort()[:1]
-            if len(c_idx) > 0:
-                row = fut_fcst.iloc[c_idx].iloc[0]
-                pred = to_float(row['yhat'])
-                pup = calculate_probability(curr, pred, to_float(row['yhat_lower']), to_float(row['yhat_upper']))
-                reasons = get_ai_reasons_short(fcst, tgt_d, curr, pred)
-                
-                st.markdown(f"""
-                <div style="margin-bottom: 15px;">
-                    <div style="font-size: 1.1rem; font-weight: bold;">
-                        {lbl}後の予測: {pred:,.0f}円  {pup:.1f}%
-                    </div>
-                    <div style="font-size: 0.95rem; color: #dddddd; margin-left: 15px;">
-                        └ 要因: {reasons}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        # --- 5. 長期予測チャート (ボタン追加版) ---
-        st.markdown("#### **長期予測チャート**")
-
-        zoom_period = st.radio(
-            "表示期間",
-            ["1M", "3M", "6M", "1Y", "3Y", "ALL"],
-            index=3,
-            horizontal=True,
-            label_visibility="collapsed"
-        )
-
-        days_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "3Y": 365*3, "ALL": 365*5}
-        
-        if zoom_period == "ALL":
-            x_start = df_hist[date_c].min()
-            x_end = fcst['ds'].max()
-        else:
-            days = days_map[zoom_period]
-            x_start = last_d - timedelta(days=days)
-            x_end = last_d + timedelta(days=days) 
+            current_bar = start_progress + (step * (i + 1))
+            progress_bar_obj.progress(min(current_bar, 1.0), text=f"分析中: {ticker}")
             
-        fig = go.Figure()
-        fig.add_trace(go.Candlestick(x=df_hist[date_c], open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name='実測'))
-        fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat'], mode='lines', name='AI', line=dict(color='yellow', width=2)))
-        fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat_upper'], mode='lines', line=dict(width=0), hoverinfo='skip', showlegend=False))
-        fig.add_trace(go.Scatter(x=fcst['ds'], y=fcst['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(255, 255, 0, 0.2)', hoverinfo='skip', showlegend=False))
+            # 1. 株価データの取得
+            df = yf.download(ticker, period=period, progress=False)
+            
+            # 2. ファンダメンタルズ情報の取得（オプション）
+            per = "-"
+            pbr = "-"
+            yield_val = "-"
+            is_good_fundamental = False
 
-        fig.update_layout(
-            template="plotly_dark",
-            height=450, 
-            margin=dict(l=0, r=0, t=10, b=0),
-            xaxis=dict(
-                rangeslider=dict(visible=False), 
-                range=[x_start, x_end],
-                type="date",
-                fixedrange=True
-            ),
-            yaxis=dict(
-                fixedrange=True
-            ),
-            showlegend=False
-        )
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'staticPlot': False, 'scrollZoom': False})
+            if get_fundamentals and ticker not in SECTOR_ETFS:
+                try:
+                    # Tickerオブジェクトから詳細情報を取得
+                    ticker_info = yf.Ticker(ticker).info
+                    
+                    # PER (取得できない場合はハイフン)
+                    raw_per = ticker_info.get('trailingPE', None)
+                    if raw_per: per = f"{raw_per:.1f}倍"
+                    
+                    # PBR
+                    raw_pbr = ticker_info.get('priceToBook', None)
+                    if raw_pbr: pbr = f"{raw_pbr:.2f}倍"
 
-    except Exception as e:
-        st.error(f"システムエラーが発生しました: {e}")
+                    # 配当利回り
+                    raw_yield = ticker_info.get('dividendYield', None)
+                    if raw_yield: yield_val = f"{raw_yield*100:.2f}%"
+
+                    # ★AI割安判定ロジック
+                    # PER < 15 かつ PBR < 1.2 かつ 配当 > 3.0% なら「優良」
+                    if (raw_per and raw_per < 15) and (raw_pbr and raw_pbr < 1.2) and (raw_yield and raw_yield > 0.03):
+                        is_good_fundamental = True
+
+                except:
+                    pass
+
+            if len(df) == 0: continue
+            
+            if isinstance(df.columns, pd.MultiIndex):
+                 df.columns = df.columns.get_level_values(0)
+
+            high = df['High'].max()
+            low = df['Low'].min()
+            current = df['Close'].iloc[-1]
+            
+            if high == low: pct = 0
+            else: pct = ((current - low) / (high - low)) * 100
+
+            upside = ((high - current) / current) * 100
+            downside = ((current - low) / current) * 100 * -1
+            
+            if ticker in SECTOR_ETFS: cost_str = "-"
+            else: cost_str = f"{int(current * 100):,}円"
+
+            # ----------------------------------
+            # 判定ロジック (AI総合スコア)
+            # ----------------------------------
+            status = "待機"
+            rank = 3
+            
+            # 基本の底値判定
+            if pct <= 10: status = "★買い"; rank = 2
+            elif pct <= 20: status = "様子見"; rank = 3
+            if pct >= 90: status = "⚠️高値"; rank = 5
+
+            # ★AI特別判定（底値圏 ＋ ファンダメンタルズ良）
+            if (pct <= 20) and is_good_fundamental:
+                status = "👑AI推奨" # 特別なステータス
+                rank = 1 # 最優先表示
+
+            stock_name = NAME_MAP.get(ticker, "") 
+            display_name = f"{ticker.replace('.T','')} {stock_name}"
+
+            # 結果データ作成
+            data_row = {
+                "銘柄": display_name,
+                "判定": status,
+                "現在位置": f"{pct:.1f}%",
+                "現在値": int(current),
+                "_rank": rank,
+                "_pos_val": pct
+            }
+
+            # ファンダメンタルズ列の追加
+            if get_fundamentals:
+                data_row["PER"] = per
+                data_row["PBR"] = pbr
+                data_row["配当"] = yield_val
+
+            results.append(data_row)
+        except: pass
+    return results
+
+def display_table(data_list, title, is_mobile):
+    if not data_list:
+        st.warning(f"{title} のデータがありません")
+        return
+    st.subheader(title)
+    df_res = pd.DataFrame(data_list)
+    df_res = df_res.sort_values(by=['_rank', '_pos_val'])
+    
+    # 隠し列を除外して表示用データを作る
+    show_df = df_res.drop(columns=['_rank', '_pos_val'])
+
+    # スマホ表示の列制御
+    if is_mobile:
+        # PERなどが含まれているかチェック
+        cols = ['銘柄', '判定', '現在位置']
+        if "PER" in show_df.columns:
+            cols.extend(['PER', '配当']) # スマホでも重要指標は出す
+        elif "現在値" in show_df.columns:
+            cols.append('現在値')
+            
+        # 存在する列だけを表示
+        existing_cols = [c for c in cols if c in show_df.columns]
+        show_df = show_df[existing_cols]
+    
+    # 色設定（AI推奨は黄色い枠のように目立たせる）
+    def highlight_row(row):
+        status_val = row['判定']
+        if "👑AI推奨" in status_val:
+            # ゴールド（黄色）背景
+            return ['background-color: #ffd700; color: black; font-weight: bold; border: 2px solid orange'] * len(row)
+        elif "★買い" in status_val:
+            return ['background-color: #ffcccc; color: black; font-weight: bold'] * len(row)
+        elif "⚠️高値" in status_val:
+            return ['background-color: #fff4cc; color: black; font-weight: bold'] * len(row)
+        else:
+            return [''] * len(row)
+
+    st.dataframe(show_df.style.apply(highlight_row, axis=1), use_container_width=True, height=(len(show_df) + 1) * 35 + 3, hide_index=True)
+
+# ---------------------------------------------------------
+# メイン処理
+# ---------------------------------------------------------
+
+# ★ Geminiチャット
+with st.expander("🤖 AIアシスタント (Gemini) に質問する"):
+    if not gemini_available:
+        st.error("APIキー未設定です")
+    else:
+        if "messages" not in st.session_state:
+            st.session_state["messages"] = [{"role": "assistant", "content": "投資の疑問にお答えします！"}]
+        for msg in st.session_state.messages: st.chat_message(msg["role"]).write(msg["content"])
+        if prompt := st.chat_input("例: PER10倍は割安？"):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.chat_message("user").write(prompt)
+            try:
+                response = model.generate_content(prompt)
+                st.session_state.messages.append({"role": "assistant", "content": response.text})
+                st.chat_message("assistant").write(response.text)
+            except: pass
+
+user_stocks = check_login()
+
+if user_stocks:
+    st.title("📊 日経プライム AI分析ツール")
+    jst = pytz.timezone('Asia/Tokyo')
+    now_str = datetime.now(jst).strftime('%Y/%m/%d %H:%M')
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.write(f"最終更新: **{now_str}**")
+        period_label = st.radio("期間:", ["1年", "2年", "3年", "5年"], index=1, horizontal=True)
+        selected_period = {"1年": "1y", "2年": "2y", "3年": "3y", "5年": "5y"}[period_label]
+        
+        # ★ファンダメンタルズ分析のON/OFFスイッチ（速度対策）
+        use_fundamental = st.checkbox("詳細分析を行う（PER/PBR/配当）※少し時間がかかります", value=True)
+
+    with col2:
+        st.write("") 
+        if st.button('🔄 更新'): st.rerun()
+
+    use_mobile_view = st.toggle("📱 スマホ用シンプル表示", value=True)
+    st.markdown("---")
+    
+    my_bar = st.progress(0, text="分析開始...")
+    
+    # ユーザー銘柄は詳細分析(ONの場合)
+    my_results = analyze_market(user_stocks, selected_period, my_bar, 0.0, 0.7, get_fundamentals=use_fundamental)
+    # ETFは詳細分析不要（False）
+    sector_results = analyze_market(SECTOR_ETFS, selected_period, my_bar, 0.7, 1.0, get_fundamentals=False)
+    my_bar.empty()
+
+    display_table(my_results, "🔍 監視銘柄リスト", use_mobile_view)
+    
+    # AI推奨が出た場合だけ、上部に特別メッセージを出す
+    top_picks = [d['銘柄'] for d in my_results if "👑AI推奨" in d['判定']]
+    if top_picks:
+        st.success(f"🔥 **AI激アツ判定（割安×底値×高配当）:** {'、'.join(top_picks)}")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    display_table(sector_results, "🌏 業種別トレンド (参考)", use_mobile_view)
